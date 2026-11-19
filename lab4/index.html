@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Лабораторная 4 – Отсечение</title>
+<link rel="stylesheet" href="../style.css">
+<style>
+  #cv { width: 100%; height: 540px; }
+  .side { flex: 1; min-width: 280px; }
+  .main { flex: 2.4; min-width: 320px; }
+  .side > label:first-child { display: flex; margin: 0; }
+  .side select { flex: 1; min-width: 0; }
+  #result { font-family: monospace; font-size: 13px; white-space: pre; max-height: 260px; overflow: auto; }
+</style>
+</head>
+<body>
+<a href="../index.html">← Все лабораторные</a>
+<h1>Лабораторная 4. Отсечение отрезков и многоугольников</h1>
+
+<div class="row">
+  <div class="card side">
+    <label>Алгоритм: <select id="alg"></select></label>
+    <p class="muted" id="fmt"></p>
+    <textarea id="data" rows="14"></textarea>
+    <p>
+      <button id="run">Отсечь</button>
+      <button id="ex">Пример</button>
+      <button id="rnd">Случайно</button>
+      <label>Загрузить файл: <input type="file" id="file" accept=".txt,text/plain"></label>
+    </p>
+    <p class="muted"><b style="color:#26c">Синий</b> – отсекающее окно, <b style="color:#e33">красный пунктир</b> – исходные данные,
+      <b style="color:#0a0">зелёный</b> – видимая (отсечённая) часть.</p>
+    <div id="result"></div>
+  </div>
+  <div class="card main"><canvas id="cv"></canvas></div>
+</div>
+
+<div class="card">
+  <h2>Пояснения</h2>
+  <p><b>Алгоритм Сазерленда–Коэна.</b> Каждому концу отрезка присваивается 4-битный код области: бит 1 – левее x<sub>min</sub>, 2 – правее x<sub>max</sub>, 4 – ниже y<sub>min</sub>, 8 – выше y<sub>max</sub>.
+    Если оба кода равны 0 – отрезок полностью видим; если (код₁ AND код₂) ≠ 0 – оба конца по одну внешнюю сторону, отрезок полностью невидим.
+    Иначе внешний конец переносится в точку пересечения с границей окна по <b>явному уравнению прямой</b> y = y₁ + k(x − x₁), k = (y₂ − y₁)/(x₂ − x₁)
+    (для x = x<sub>min</sub> / x<sub>max</sub>) или x = x₁ + (y − y₁)/k (для y = y<sub>min</sub> / y<sub>max</sub>); затем коды пересчитываются и проверка повторяется.</p>
+  <p><b>Алгоритм Лианга–Барски.</b> Параметрическое задание отрезка P(t) = P₁ + t(P₂ − P₁), t ∈ [0, 1]. Точка внутри окна, если p<sub>i</sub>·t ≤ q<sub>i</sub> для
+    p = (−Δx, Δx, −Δy, Δy), q = (x₁ − x<sub>min</sub>, x<sub>max</sub> − x₁, y₁ − y<sub>min</sub>, y<sub>max</sub> − y₁).
+    p<sub>i</sub> &lt; 0 – отрезок входит в полуплоскость: t₀ = max(t₀, q<sub>i</sub>/p<sub>i</sub>); p<sub>i</sub> &gt; 0 – выходит: t₁ = min(t₁, q<sub>i</sub>/p<sub>i</sub>);
+    p<sub>i</sub> = 0 и q<sub>i</sub> &lt; 0 – отрезок параллелен границе и лежит снаружи. Видимая часть – [t₀, t₁], если t₀ ≤ t₁.</p>
+  <p><b>Алгоритм средней точки.</b> Коды Сазерленда–Коэна используются только для тривиального принятия/отбрасывания. Отрезок, который нельзя тривиально
+    принять или отбросить, делится пополам, и обе половины обрабатываются рекурсивно, пока части не станут тривиально видимыми/невидимыми или короче 10⁻⁶.
+    Видимая часть – от первой до последней видимой части. Нужны только сложения и деление на 2 (удобно для аппаратной реализации).</p>
+  <p><b>Алгоритм Кируса–Бека (отсечение отрезков выпуклым многоугольником).</b> Обобщение алгоритма Лианга–Барски. Для каждого ребра многоугольника с внутренней нормалью n и точкой A на нём
+    точка P(t) лежит во внутренней полуплоскости, если n·(P(t) − A) ≥ 0, т.е. n·(P₁ − A) + t·n·D ≥ 0, где D = P₂ − P₁.
+    Если n·D &gt; 0 – получаем нижнюю границу для t (вход), если n·D &lt; 0 – верхнюю (выход). Многоугольник должен быть выпуклым; порядок обхода вершин определяется автоматически.</p>
+  <p><b>Алгоритм Сазерленда–Ходжмана (отсечение выпуклого многоугольника прямоугольником).</b> Многоугольник последовательно отсекается четырьмя границами окна.
+    Для каждого ребра (S → P) текущего многоугольника: оба внутри – выводим P; S внутри, P снаружи – выводим точку пересечения; оба снаружи – ничего;
+    S снаружи, P внутри – выводим точку пересечения и P. Результат для одной границы – вход для следующей.</p>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+const code = (x, y, w) => (x < w.xmin ? 1 : 0) | (x > w.xmax ? 2 : 0) | (y < w.ymin ? 4 : 0) | (y > w.ymax ? 8 : 0);
+
+function cohenSutherland([x1, y1, x2, y2], w) {
+  let c1 = code(x1, y1, w), c2 = code(x2, y2, w);
+  const vertical = x1 === x2, k = vertical ? 0 : (y2 - y1) / (x2 - x1);
+  for (let it = 0; it < 10; it++) {
+    if (!(c1 | c2)) return [x1, y1, x2, y2];
+    if (c1 & c2) return null;
+    if (!c1) [x1, y1, c1, x2, y2, c2] = [x2, y2, c2, x1, y1, c1];
+    if (c1 & 1) { y1 = y1 + k * (w.xmin - x1); x1 = w.xmin; }
+    else if (c1 & 2) { y1 = y1 + k * (w.xmax - x1); x1 = w.xmax; }
+    else if (c1 & 4) { if (!vertical) x1 = x1 + (w.ymin - y1) / k; y1 = w.ymin; }
+    else if (c1 & 8) { if (!vertical) x1 = x1 + (w.ymax - y1) / k; y1 = w.ymax; }
+    c1 = code(x1, y1, w);
+  }
+  return null;
+}
+
+function liangBarsky([x1, y1, x2, y2], w) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const p = [-dx, dx, -dy, dy], q = [x1 - w.xmin, w.xmax - x1, y1 - w.ymin, w.ymax - y1];
+  let t0 = 0, t1 = 1;
+  for (let i = 0; i < 4; i++) {
+    if (p[i] === 0) { if (q[i] < 0) return null; continue; }
+    const t = q[i] / p[i];
+    if (p[i] < 0) { if (t > t1) return null; if (t > t0) t0 = t; }
+    else { if (t < t0) return null; if (t < t1) t1 = t; }
+  }
+  return [x1 + t0 * dx, y1 + t0 * dy, x1 + t1 * dx, y1 + t1 * dy];
+}
+
+function midpoint([x1, y1, x2, y2], w) {
+  const P = t => [x1 + (x2 - x1) * t, y1 + (y2 - y1) * t], len = Math.hypot(x2 - x1, y2 - y1);
+  let lo = Infinity, hi = -Infinity;
+  (function rec(a, b) {
+    const [ax, ay] = P(a), [bx, by] = P(b), ca = code(ax, ay, w), cb = code(bx, by, w);
+    if (!(ca | cb)) { lo = Math.min(lo, a); hi = Math.max(hi, b); return; }
+    if (ca & cb) return;
+    if ((b - a) * len < 1e-6) return;
+    const m = (a + b) / 2;
+    rec(a, m); rec(m, b);
+  })(0, 1);
+  return lo <= hi ? [...P(lo), ...P(hi)] : null;
+}
+
+function cyrusBeck([x1, y1, x2, y2], poly) {
+  const dx = x2 - x1, dy = y2 - y1;
+  let t0 = 0, t1 = 1;
+  for (let i = 0; i < poly.length; i++) {
+    const [ax, ay] = poly[i], [bx, by] = poly[(i + 1) % poly.length];
+    const nx = -(by - ay), ny = bx - ax;
+    const num = nx * (x1 - ax) + ny * (y1 - ay), den = nx * dx + ny * dy;
+    if (den === 0) { if (num < 0) return null; continue; }
+    const t = -num / den;
+    if (den > 0) t0 = Math.max(t0, t); else t1 = Math.min(t1, t);
+  }
+  return t0 <= t1 ? [x1 + t0 * dx, y1 + t0 * dy, x1 + t1 * dx, y1 + t1 * dy] : null;
+}
+
+function sutherlandHodgman(poly, w) {
+  const ixX = (a, b, x) => [x, a[1] + (b[1] - a[1]) * (x - a[0]) / (b[0] - a[0])];
+  const ixY = (a, b, y) => [a[0] + (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]), y];
+  const borders = [
+    [p => p[0] >= w.xmin, (a, b) => ixX(a, b, w.xmin)],
+    [p => p[0] <= w.xmax, (a, b) => ixX(a, b, w.xmax)],
+    [p => p[1] >= w.ymin, (a, b) => ixY(a, b, w.ymin)],
+    [p => p[1] <= w.ymax, (a, b) => ixY(a, b, w.ymax)],
+  ];
+  let out = poly;
+  for (const [inside, inter] of borders) {
+    const inp = out; out = [];
+    for (let i = 0; i < inp.length; i++) {
+      const S = inp[(i + inp.length - 1) % inp.length], P = inp[i];
+      if (inside(P)) { if (!inside(S)) out.push(inter(S, P)); out.push(P); }
+      else if (inside(S)) out.push(inter(S, P));
+    }
+    if (!out.length) break;
+  }
+  return out;
+}
+
+const area2 = poly => poly.reduce((s, [x, y], i) => { const [u, v] = poly[(i + 1) % poly.length]; return s + x * v - u * y; }, 0);
+function isConvex(poly) {
+  let sign = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const [a, b, c] = [poly[i], poly[(i + 1) % poly.length], poly[(i + 2) % poly.length]];
+    const cr = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
+    if (cr) { if (sign && Math.sign(cr) !== sign) return false; sign = Math.sign(cr); }
+  }
+  return true;
+}
+
+const MODES = {
+  cs: { name: 'Часть 1: Сазерленд–Коэн', kind: 'rect', clip: cohenSutherland },
+  lb: { name: 'Часть 1: Лианг–Барски', kind: 'rect', clip: liangBarsky },
+  mp: { name: 'Часть 1: Алгоритм средней точки', kind: 'rect', clip: midpoint },
+  cb: { name: 'Часть 2: Отсечение отрезков выпуклым многоугольником (Кирус–Бек)', kind: 'poly' },
+  sh: { name: 'Часть 2: Отсечение выпуклого многоугольника (Сазерленд–Ходжман)', kind: 'polyclip' },
+};
+const FORMATS = {
+  rect: 'Формат: n; затем n строк «X1 Y1 X2 Y2» (отрезки); затем «Xmin Ymin Xmax Ymax» (окно).',
+  poly: 'Формат: n; затем n строк «X1 Y1 X2 Y2» (отрезки); затем m; затем m строк «X Y» – вершины выпуклого отсекающего многоугольника.',
+  polyclip: 'Формат: m; затем m строк «X Y» – вершины отсекаемого выпуклого многоугольника; затем «Xmin Ymin Xmax Ymax» (окно).',
+};
+const EXAMPLES = {
+  rect: `6\n-4 1 12 9\n2 -3 6 12\n-5 -2 -1 10\n1 2 7 6\n-3 11 13 -2\n9 -4 14 3\n0 0 10 8`,
+  poly: `6\n-4 1 12 9\n2 -3 6 12\n-5 -2 -1 10\n3 3 6 5\n-3 11 13 -2\n9 -4 14 3\n5\n2 0\n9 2\n10 7\n5 10\n0 6`,
+  polyclip: `6\n-2 3\n5 -3\n13 1\n14 7\n7 12\n0 9\n0 0 10 8`,
+};
+for (const k in MODES) $('alg').add(new Option(MODES[k].name, k));
+
+function parse(kind, text) {
+  const v = text.trim().split(/\s+/).map(Number);
+  if (v.some(isNaN)) throw 'во входных данных есть что-то, кроме чисел';
+  let i = 0;
+  const take = k => { if (i + k > v.length) throw 'не хватает чисел во входных данных'; const r = v.slice(i, i + k); i += k; return r; };
+  const res = {};
+  if (kind !== 'polyclip') { const n = take(1)[0]; res.segs = []; for (let j = 0; j < n; j++) res.segs.push(take(4)); }
+  if (kind === 'poly') { const m = take(1)[0]; res.poly = []; for (let j = 0; j < m; j++) res.poly.push(take(2)); if (m < 3) throw 'у многоугольника должно быть не меньше 3 вершин'; }
+  if (kind === 'polyclip') { const m = take(1)[0]; res.poly = []; for (let j = 0; j < m; j++) res.poly.push(take(2)); if (m < 3) throw 'у многоугольника должно быть не меньше 3 вершин'; }
+  if (kind !== 'poly') {
+    const [a, b, c, d] = take(4);
+    res.win = { xmin: Math.min(a, c), ymin: Math.min(b, d), xmax: Math.max(a, c), ymax: Math.max(b, d) };
+  }
+  return res;
+}
+
+const cv = $('cv'), ctx = cv.getContext('2d');
+let view;
+
+function setView(points) {
+  let [xmin, xmax, ymin, ymax] = [0, 0, 0, 0];
+  for (const [x, y] of points) { xmin = Math.min(xmin, x); xmax = Math.max(xmax, x); ymin = Math.min(ymin, y); ymax = Math.max(ymax, y); }
+  const pad = 40, S = Math.min((cv.width - 2 * pad) / (xmax - xmin || 1), (cv.height - 2 * pad) / (ymax - ymin || 1));
+  view = { S, ox: cv.width / 2 - (xmin + xmax) / 2 * S, oy: cv.height / 2 + (ymin + ymax) / 2 * S };
+}
+const X = x => view.ox + x * view.S, Y = y => view.oy - y * view.S;
+
+function drawAxes() {
+  const W = cv.width, H = cv.height, S = view.S;
+  const raw = 40 / S, p = 10 ** Math.floor(Math.log10(raw)), st = [1, 2, 5, 10].map(m => m * p).find(v => v >= raw);
+  const xa = Math.ceil(-view.ox / S / st) * st, xb = (W - view.ox) / S, ya = Math.ceil((view.oy - H) / S / st) * st, yb = view.oy / S;
+  const lbl = v => +v.toFixed(6);
+  ctx.strokeStyle = '#eee'; ctx.lineWidth = 1; ctx.beginPath();
+  for (let x = xa; x <= xb; x += st) { ctx.moveTo(X(x), 0); ctx.lineTo(X(x), H); }
+  for (let y = ya; y <= yb; y += st) { ctx.moveTo(0, Y(y)); ctx.lineTo(W, Y(y)); }
+  ctx.stroke();
+  ctx.strokeStyle = '#000'; ctx.fillStyle = '#000'; ctx.beginPath();
+  ctx.moveTo(0, Y(0)); ctx.lineTo(W, Y(0)); ctx.moveTo(X(0), 0); ctx.lineTo(X(0), H); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(W, Y(0)); ctx.lineTo(W - 10, Y(0) - 5); ctx.lineTo(W - 10, Y(0) + 5);
+  ctx.moveTo(X(0), 0); ctx.lineTo(X(0) - 5, 10); ctx.lineTo(X(0) + 5, 10); ctx.fill();
+  ctx.font = '13px sans-serif'; ctx.fillText('X', W - 14, Y(0) - 8); ctx.fillText('Y', X(0) + 8, 12);
+  ctx.font = '11px sans-serif'; ctx.beginPath();
+  for (let x = xa; x <= xb; x += st) if (Math.abs(x) > st / 2) { ctx.moveTo(X(x), Y(0) - 4); ctx.lineTo(X(x), Y(0) + 4); ctx.fillText(lbl(x), X(x) - 6, Y(0) + 15); }
+  for (let y = ya; y <= yb; y += st) if (Math.abs(y) > st / 2) { ctx.moveTo(X(0) - 4, Y(y)); ctx.lineTo(X(0) + 4, Y(y)); ctx.fillText(lbl(y), X(0) + 6, Y(y) + 4); }
+  ctx.stroke(); ctx.fillText('0', X(0) + 4, Y(0) + 14);
+}
+
+function polyPath(poly) { ctx.beginPath(); poly.forEach(([x, y], i) => i ? ctx.lineTo(X(x), Y(y)) : ctx.moveTo(X(x), Y(y))); ctx.closePath(); }
+function seg([x1, y1, x2, y2]) { ctx.beginPath(); ctx.moveTo(X(x1), Y(y1)); ctx.lineTo(X(x2), Y(y2)); ctx.stroke(); }
+const rectPoly = w => [[w.xmin, w.ymin], [w.xmax, w.ymin], [w.xmax, w.ymax], [w.xmin, w.ymax]];
+const f = v => +v.toFixed(3);
+
+function run() {
+  cv.width = cv.clientWidth; cv.height = cv.clientHeight;
+  const mode = MODES[$('alg').value];
+  let d;
+  try { d = parse(mode.kind, $('data').value); }
+  catch (e) { $('result').textContent = 'Ошибка: ' + e; ctx.clearRect(0, 0, cv.width, cv.height); return; }
+
+  let windowPoly = d.win ? rectPoly(d.win) : d.poly, note = '';
+  if (mode.kind === 'poly') {
+    if (!isConvex(d.poly)) note = 'ВНИМАНИЕ: отсекающий многоугольник не выпуклый – результат Кируса–Бека некорректен.\n';
+    windowPoly = area2(d.poly) < 0 ? [...d.poly].reverse() : d.poly;
+  }
+  const pts = [...(mode.kind === 'polyclip' ? rectPoly(d.win) : windowPoly)];
+  (d.segs || []).forEach(s => pts.push([s[0], s[1]], [s[2], s[3]]));
+  if (mode.kind === 'polyclip') pts.push(...d.poly);
+  setView(pts);
+
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  drawAxes();
+  const win = mode.kind === 'polyclip' ? rectPoly(d.win) : windowPoly;
+  polyPath(win); ctx.fillStyle = 'rgba(40,100,220,0.08)'; ctx.fill(); ctx.strokeStyle = '#26c'; ctx.lineWidth = 2; ctx.stroke();
+
+  const out = [];
+  if (mode.kind === 'polyclip') {
+    if (!isConvex(d.poly)) note = 'Примечание: многоугольник не выпуклый – в результате могут быть вырожденные рёбра.\n';
+    ctx.setLineDash([6, 4]); ctx.strokeStyle = '#e33'; ctx.lineWidth = 1.5; polyPath(d.poly); ctx.stroke(); ctx.setLineDash([]);
+    const r = sutherlandHodgman(d.poly, d.win);
+    if (r.length) { polyPath(r); ctx.fillStyle = 'rgba(0,170,0,0.25)'; ctx.fill(); ctx.strokeStyle = '#0a0'; ctx.lineWidth = 3; ctx.stroke(); }
+    out.push(r.length ? 'Вершины отсечённого многоугольника:' : 'Многоугольник целиком вне окна.');
+    r.forEach(([x, y]) => out.push(`  (${f(x)}, ${f(y)})`));
+  } else {
+    d.segs.forEach((s, i) => {
+      ctx.setLineDash([6, 4]); ctx.strokeStyle = '#e33'; ctx.lineWidth = 1.5; seg(s); ctx.setLineDash([]);
+      const r = mode.kind === 'poly' ? cyrusBeck(s, windowPoly) : mode.clip(s, d.win);
+      if (r) { ctx.strokeStyle = '#0a0'; ctx.lineWidth = 3.5; seg(r); }
+      out.push(`${i + 1}: (${s.map(f).join(', ')}) → ` + (r ? `видимая часть (${r.map(f).join(', ')})` : 'невидим'));
+    });
+  }
+  $('result').textContent = note + out.join('\n');
+}
+
+function example() { $('data').value = EXAMPLES[MODES[$('alg').value].kind]; run(); }
+
+function random() {
+  const kind = MODES[$('alg').value].kind, R = () => Math.round(Math.random() * 30 - 10);
+  const n = 10, lines = [n];
+  if (kind === 'polyclip') {
+    const m = 3 + Math.floor(Math.random() * 6), cx = R(), cy = R(), rad = 6 + Math.random() * 8, a0 = Math.random() * 6;
+    const out = [m];
+    for (let i = 0; i < m; i++) { const a = a0 + i * 2 * Math.PI / m; out.push(`${f(cx + rad * Math.cos(a))} ${f(cy + rad * Math.sin(a))}`); }
+    out.push('-3 -2 9 7');
+    $('data').value = out.join('\n'); return run();
+  }
+  for (let i = 0; i < n; i++) lines.push(`${R()} ${R()} ${R()} ${R()}`);
+  lines.push(kind === 'poly' ? EXAMPLES.poly.split('\n').slice(7).join('\n') : '-3 -2 9 7');
+  $('data').value = lines.join('\n'); run();
+}
+
+$('alg').onchange = () => { $('fmt').textContent = FORMATS[MODES[$('alg').value].kind]; example(); };
+$('run').onclick = run;
+$('ex').onclick = example;
+$('rnd').onclick = random;
+$('file').onchange = e => { const fl = e.target.files[0]; if (fl) fl.text().then(t => { $('data').value = t; run(); }); e.target.value = ''; };
+window.onresize = run;
+$('alg').onchange();
+</script>
+</body>
+</html>

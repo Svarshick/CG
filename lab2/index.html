@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Лабораторная 2 – Обработка изображений</title>
+<link rel="stylesheet" href="../style.css">
+<style> figure canvas { width: 256px; image-rendering: pixelated; } </style>
+</head>
+<body>
+<a href="../index.html">← Все лабораторные</a>
+<h1>Лабораторная 2. Глобальная пороговая обработка и низкочастотные (сглаживающие) фильтры</h1>
+
+<div class="card">
+  <label>Тестовое изображение: <select id="sel"></select></label>
+  <label>или загрузите своё: <input type="file" id="file" accept="image/*"></label>
+  <p class="muted" id="desc"></p>
+  <div class="row">
+    <figure><canvas id="cOrig"></canvas><figcaption>Исходное изображение</figcaption></figure>
+    <figure><canvas id="cHist" width="300" height="170"></canvas>
+      <figcaption>Гистограмма яркости входа пороговой обработки.
+        Линии: <b style="color:#d22">Оцу</b>, <b style="color:#26c">итеративный</b>, <b style="color:#999">ручной</b></figcaption></figure>
+  </div>
+</div>
+
+<div class="card">
+  <h2>1. Глобальная пороговая обработка (сравнение двух методов)</h2>
+  <label>Сглаживание перед пороговой обработкой: <select id="pre">
+    <option value="none">нет</option><option value="box">усредняющий фильтр</option>
+    <option value="gauss">фильтр Гаусса</option><option value="median">медианный фильтр</option></select></label>
+  <label>Ручной порог T: <input type="range" id="manT" min="0" max="255" value="128"> <span id="manTv"></span></label>
+  <div class="row" style="margin-top:8px">
+    <figure><canvas id="cOtsu"></canvas><figcaption id="tOtsu"></figcaption></figure>
+    <figure><canvas id="cIter"></canvas><figcaption id="tIter"></figcaption></figure>
+    <figure><canvas id="cMan"></canvas><figcaption id="tMan"></figcaption></figure>
+  </div>
+  <details open><summary><b>Пояснения</b></summary>
+    <p>Глобальная пороговая обработка использует <b>один порог T для всего изображения</b>: пиксель становится белым, если его яркость g &gt; T, иначе – чёрным.
+      Яркость g = 0.299R + 0.587G + 0.114B. Методы отличаются тем, как порог T выбирается по гистограмме.</p>
+    <p><b>Итеративный метод (Ридлер–Калвард / ISODATA).</b> Начальный порог T = средняя яркость.
+      Пиксели делятся на две группы (≤ T и &gt; T), вычисляются их средние m₁ и m₂, новый порог T = (m₁ + m₂)/2. Повторяем, пока T меняется больше чем на 0.5.
+      Порог ставится посередине между средними двух классов, количество пикселей в классах не учитывается.</p>
+    <p><b>Метод Оцу.</b> Перебираются все T = 0…255 и выбирается тот, при котором максимальна межклассовая дисперсия
+      σ²<sub>B</sub>(T) = ω₀(T)·ω₁(T)·(μ₀(T) − μ₁(T))², где ω – вероятности классов, μ – средние значения классов.
+      Это эквивалентно минимизации дисперсии внутри классов. Размеры классов учитываются.</p>
+    <p><b>Сравнение.</b> На чистом бимодальном изображении оба метода дают практически одинаковый результат. Когда один класс гораздо меньше другого
+      («Маленький яркий объект», ~2% пикселей), итеративный метод стартует со средней яркости, которая лежит внутри пика фона, и сходится туда же –
+      половина фона становится «объектом». Метод Оцу проверяет все T и находит провал между пиками.
+      См. значение «ошибка» (% неверно классифицированных пикселей относительно известной эталонной маски тестового изображения).
+      Шум приводит к «крапинкам» у обоих методов – помогает предварительное сглаживание. Неравномерное освещение и очень низкий контраст ломают <i>любой</i> глобальный порог:
+      один T не может везде отделить объект от фона (нужен локальный/адаптивный метод).</p>
+  </details>
+</div>
+
+<div class="card">
+  <h2>2. Низкочастотные (сглаживающие) фильтры</h2>
+  <label>Размер ядра: <input type="range" id="ks" min="3" max="9" step="2" value="3"> <span id="ksv"></span></label>
+  <label>σ Гаусса: <input type="range" id="sig" min="0.5" max="4" step="0.1" value="1"> <span id="sigv"></span></label>
+  <div class="row" style="margin-top:8px">
+    <figure><canvas id="cBox"></canvas><figcaption id="tBox"></figcaption></figure>
+    <figure><canvas id="cGauss"></canvas><figcaption id="tGauss"></figcaption></figure>
+    <figure><canvas id="cMed"></canvas><figcaption id="tMed"></figcaption></figure>
+  </div>
+  <details open><summary><b>Пояснения</b></summary>
+    <p>Низкочастотные фильтры сохраняют плавные изменения яркости (низкие частоты) и подавляют быстрые (шум, мелкие детали, резкие границы).
+      Каждый выходной пиксель вычисляется по окрестности n×n (на границах изображения крайние пиксели повторяются).</p>
+    <p><b>Усредняющий (box) фильтр</b> – все веса равны 1/n². Простой и быстрый, убирает гауссов шум, но сильно размывает границы.</p>
+    <p><b>Фильтр Гаусса</b> – веса w(x, y) ∝ exp(−(x² + y²)/(2σ²)), нормированные к сумме 1. Близкие пиксели имеют больший вес, поэтому границы размываются меньше, чем у усредняющего фильтра при том же подавлении шума.
+      Ядра усредняющего и гауссова фильтров сепарабельны, поэтому применяются как два одномерных прохода: горизонтальный и вертикальный.</p>
+    <p><b>Медианный фильтр</b> – (нелинейный) результат – медиана значений окрестности. Отлично убирает импульсный шум «соль и перец» (одиночные чёрные/белые пиксели
+      никогда не оказываются медианой) и сохраняет границы; усредняющие фильтры такие выбросы лишь размазывают.</p>
+    <p><b>PSNR</b> = 10·log₁₀(255² / MSE) относительно незашумлённой версии тестового изображения – чем больше, тем лучше.</p>
+  </details>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const N = 256;
+
+function rng(seed) { return () => { seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const gaussRnd = r => Math.sqrt(-2 * Math.log(1 - r())) * Math.cos(2 * Math.PI * r());
+
+function shapesMask(small) {
+  const c = document.createElement('canvas'); c.width = c.height = N;
+  const g = c.getContext('2d');
+  g.fillStyle = '#000'; g.fillRect(0, 0, N, N); g.fillStyle = '#fff';
+  if (small) { g.beginPath(); g.arc(180, 80, 14, 0, 7); g.fill(); g.fillRect(60, 170, 22, 22); }
+  else {
+    g.beginPath(); g.arc(80, 80, 45, 0, 7); g.fill();
+    g.fillRect(140, 40, 80, 60);
+    g.beginPath(); g.moveTo(30, 230); g.lineTo(110, 140); g.lineTo(120, 235); g.fill();
+    g.font = 'bold 72px sans-serif'; g.fillText('CG', 140, 220);
+  }
+  const d = g.getImageData(0, 0, N, N).data, m = new Uint8Array(N * N);
+  for (let i = 0; i < N * N; i++) m[i] = d[i * 4] > 127 ? 1 : 0;
+  return m;
+}
+
+function makeTest({ small = false, obj = 60, bg = 190, illum = false, sigma = 0, sp = 0 }) {
+  const mask = shapesMask(small), r = rng(42), img = new ImageData(N, N), clean = new ImageData(N, N);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const i = y * N + x;
+    let v = mask[i] ? obj : bg;
+    if (illum) v *= 0.15 + 1.1 * x / N;
+    const c = v;
+    if (sigma) v += sigma * gaussRnd(r);
+    if (sp && r() < sp) v = r() < 0.5 ? 0 : 255;
+    for (let k = 0; k < 3; k++) { img.data[i * 4 + k] = v; clean.data[i * 4 + k] = c; }
+    img.data[i * 4 + 3] = clean.data[i * 4 + 3] = 255;
+  }
+  return { img, clean, mask, objBright: obj > bg };
+}
+
+const TESTS = [
+  { name: 'Чистые фигуры (бимодальная)', p: {}, d: 'Тёмные объекты на светлом фоне. Идеальный случай – оба метода работают.' },
+  { name: 'Гауссов шум', p: { sigma: 45 }, d: 'Сильный гауссов шум. Пороговая обработка даёт «крапинки»; помогает усредняющий/гауссов фильтр (см. «Сглаживание перед пороговой обработкой»).' },
+  { name: 'Шум «соль и перец»', p: { sp: 0.15 }, d: '15% пикселей заменены на чисто чёрные/белые. Медианный фильтр убирает такой шум, усредняющие – только размазывают.' },
+  { name: 'Маленький яркий объект', p: { small: true, obj: 200, bg: 70, sigma: 15 }, d: 'Маленький объект (~2% пикселей) на большом зашумлённом фоне – сильно несбалансированная гистограмма. Метод Оцу находит объект, итеративный метод застревает внутри пика фона.' },
+  { name: 'Низкий контраст', p: { obj: 118, bg: 138, sigma: 8 }, d: 'Низкий контраст: пики гистограммы перекрываются, глобальные методы много ошибаются.' },
+  { name: 'Неравномерное освещение', p: { illum: true }, d: 'Свет падает справа. Ни один глобальный порог не отделяет объекты везде – ограничение глобальной пороговой обработки.' },
+];
+TESTS.forEach((t, i) => $('sel').add(new Option(t.name, i)));
+
+function toGray(img) {
+  const d = img.data, g = new Uint8Array(d.length / 4);
+  for (let i = 0; i < g.length; i++) g[i] = Math.round(0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]);
+  return g;
+}
+function histogram(g) { const h = new Array(256).fill(0); for (const v of g) h[v]++; return h; }
+
+function otsu(h, total) {
+  let sum = 0; for (let i = 0; i < 256; i++) sum += i * h[i];
+  let sumB = 0, wB = 0, best = -1, T = 0;
+  for (let t = 0; t < 256; t++) {
+    wB += h[t]; if (!wB) continue;
+    const wF = total - wB; if (!wF) break;
+    sumB += t * h[t];
+    const mB = sumB / wB, mF = (sum - sumB) / wF, v = wB * wF * (mB - mF) ** 2;
+    if (v > best) { best = v; T = t; }
+  }
+  return T;
+}
+
+function iterative(h, total) {
+  let sum = 0; for (let i = 0; i < 256; i++) sum += i * h[i];
+  let T = sum / total, prev = -1, it = 0;
+  while (Math.abs(T - prev) >= 0.5 && it < 100) {
+    prev = T; it++;
+    let s1 = 0, n1 = 0, s2 = 0, n2 = 0;
+    for (let i = 0; i < 256; i++) if (i <= T) { s1 += i * h[i]; n1 += h[i]; } else { s2 += i * h[i]; n2 += h[i]; }
+    const m1 = n1 ? s1 / n1 : 0, m2 = n2 ? s2 / n2 : 255;
+    T = (m1 + m2) / 2;
+  }
+  return { T, it };
+}
+
+function binarize(g, T, w, h) {
+  const o = new ImageData(w, h);
+  for (let i = 0; i < g.length; i++) { const v = g[i] > T ? 255 : 0; o.data[i * 4] = o.data[i * 4 + 1] = o.data[i * 4 + 2] = v; o.data[i * 4 + 3] = 255; }
+  return o;
+}
+
+function errorPct(g, T) {
+  if (!src.mask) return '';
+  let bad = 0;
+  for (let i = 0; i < g.length; i++) if (((g[i] > T) === src.objBright) !== !!src.mask[i]) bad++;
+  return `, ошибка ${(100 * bad / g.length).toFixed(2)}% пикселей`;
+}
+
+function conv1(d, w, h, k, horiz) {
+  const out = new Float32Array(d.length), r = (k.length - 1) / 2;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) for (let c = 0; c < 3; c++) {
+    let s = 0;
+    for (let j = -r; j <= r; j++) {
+      const xx = horiz ? Math.min(w - 1, Math.max(0, x + j)) : x, yy = horiz ? y : Math.min(h - 1, Math.max(0, y + j));
+      s += k[j + r] * d[(yy * w + xx) * 4 + c];
+    }
+    out[(y * w + x) * 4 + c] = s;
+  }
+  return out;
+}
+function separable(img, k) {
+  const { width: w, height: h } = img, a = conv1(img.data, w, h, k, true), b = conv1(a, w, h, k, false), o = new ImageData(w, h);
+  for (let i = 0; i < b.length; i++) o.data[i] = (i & 3) === 3 ? 255 : b[i];
+  return o;
+}
+const boxKernel = n => new Array(n).fill(1 / n);
+function gaussKernel(n, s) {
+  const r = (n - 1) / 2, k = [];
+  for (let i = -r; i <= r; i++) k.push(Math.exp(-i * i / (2 * s * s)));
+  const t = k.reduce((a, b) => a + b);
+  return k.map(v => v / t);
+}
+function median(img, n) {
+  const { width: w, height: h, data: d } = img, o = new ImageData(w, h), r = (n - 1) / 2, buf = [];
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y * w + x) * 4;
+    for (let c = 0; c < 3; c++) {
+      buf.length = 0;
+      for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+        const xx = Math.min(w - 1, Math.max(0, x + dx)), yy = Math.min(h - 1, Math.max(0, y + dy));
+        buf.push(d[(yy * w + xx) * 4 + c]);
+      }
+      buf.sort((a, b) => a - b);
+      o.data[i + c] = buf[buf.length >> 1];
+    }
+    o.data[i + 3] = 255;
+  }
+  return o;
+}
+function psnr(img) {
+  if (!src.clean) return '';
+  let s = 0, n = 0;
+  for (let i = 0; i < img.data.length; i++) if ((i & 3) !== 3) { s += (img.data[i] - src.clean.data[i]) ** 2; n++; }
+  return `, PSNR ${(10 * Math.log10(255 * 255 / (s / n))).toFixed(1)} дБ`;
+}
+
+let src = null, filtered = {}, thrInput = null;
+
+function put(id, img) { const c = $(id); c.width = img.width; c.height = img.height; c.getContext('2d').putImageData(img, 0, 0); }
+
+function drawHist(h, lines) {
+  const c = $('cHist'), g = c.getContext('2d'), W = c.width, H = c.height - 14, max = Math.max(...h);
+  g.clearRect(0, 0, c.width, c.height);
+  g.fillStyle = '#555';
+  for (let i = 0; i < 256; i++) { const bh = h[i] / max * H; g.fillRect(i * W / 256, H - bh, W / 256 + 0.5, bh); }
+  for (const [T, col] of lines) { g.strokeStyle = col; g.lineWidth = 2; g.beginPath(); g.moveTo(T * W / 256, 0); g.lineTo(T * W / 256, H); g.stroke(); }
+  g.fillStyle = '#000'; g.font = '11px sans-serif';
+  g.fillText('0', 0, c.height - 2); g.fillText('255', W - 20, c.height - 2);
+}
+
+function updateFilters() {
+  const n = +$('ks').value, s = +$('sig').value;
+  $('ksv').textContent = `${n}×${n}`; $('sigv').textContent = s;
+  filtered = { box: separable(src.img, boxKernel(n)), gauss: separable(src.img, gaussKernel(n, s)), median: median(src.img, n) };
+  put('cBox', filtered.box); $('tBox').textContent = `Усредняющий ${n}×${n}` + psnr(filtered.box);
+  put('cGauss', filtered.gauss); $('tGauss').textContent = `Гаусса ${n}×${n}, σ = ${s}` + psnr(filtered.gauss);
+  put('cMed', filtered.median); $('tMed').textContent = `Медианный ${n}×${n}` + psnr(filtered.median);
+  updateThreshold();
+}
+
+function updateThreshold() {
+  const pre = $('pre').value, img = pre === 'none' ? src.img : filtered[pre];
+  const g = toGray(img), h = histogram(g), w = img.width, ht = img.height;
+  const To = otsu(h, g.length), { T: Ti, it } = iterative(h, g.length);
+  thrInput = { g, h, w, ht, To, Ti };
+  put('cOtsu', binarize(g, To, w, ht)); $('tOtsu').textContent = `Оцу: T = ${To}` + errorPct(g, To);
+  put('cIter', binarize(g, Ti, w, ht)); $('tIter').textContent = `Итеративный: T = ${Ti.toFixed(1)} (итераций: ${it})` + errorPct(g, Ti);
+  updateManual();
+}
+
+function updateManual() {
+  const { g, h, w, ht, To, Ti } = thrInput, T = +$('manT').value;
+  $('manTv').textContent = T;
+  put('cMan', binarize(g, T, w, ht)); $('tMan').textContent = `Ручной: T = ${T}` + errorPct(g, T);
+  drawHist(h, [[T, '#999'], [Ti, '#26c'], [To, '#d22']]);
+}
+
+function setSource(s, desc) {
+  src = s; $('desc').textContent = desc;
+  put('cOrig', s.img);
+  updateFilters();
+}
+
+$('sel').onchange = () => { const t = TESTS[$('sel').value]; setSource(makeTest(t.p), t.d); };
+$('file').onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  const im = new Image();
+  im.onload = () => {
+    const k = Math.min(1, 400 / Math.max(im.width, im.height)), c = document.createElement('canvas');
+    c.width = Math.round(im.width * k); c.height = Math.round(im.height * k);
+    const g = c.getContext('2d'); g.drawImage(im, 0, 0, c.width, c.height);
+    setSource({ img: g.getImageData(0, 0, c.width, c.height) }, 'Загруженное изображение (эталона нет, поэтому ошибка и PSNR не показываются).');
+  };
+  im.src = URL.createObjectURL(f);
+};
+$('ks').oninput = $('sig').oninput = updateFilters;
+$('pre').onchange = updateThreshold;
+$('manT').oninput = updateManual;
+
+$('sel').onchange();
+</script>
+</body>
+</html>

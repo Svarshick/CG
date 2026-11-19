@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Лабораторная 3 – Растровые алгоритмы</title>
+<link rel="stylesheet" href="../style.css">
+<style>
+  #cv { width: 100%; height: 520px; cursor: grab; }
+  .grp { display: inline-flex; gap: 6px; align-items: center; }
+  #steps { max-height: 360px; overflow: auto; display: inline-block; }
+</style>
+</head>
+<body>
+<a href="../index.html">← Все лабораторные</a>
+<h1>Лабораторная 3. Базовые растровые алгоритмы</h1>
+
+<div class="card">
+  <label>Алгоритм: <select id="alg"></select></label>
+  <span class="grp" id="gLine">
+    <label>x₀ <input type="number" id="x0" value="-8"></label><label>y₀ <input type="number" id="y0" value="-3"></label>
+    <label>x₁ <input type="number" id="x1" value="10"></label><label>y₁ <input type="number" id="y1" value="6"></label>
+  </span>
+  <span class="grp" id="gCirc">
+    <label>x<sub>c</sub> <input type="number" id="xc" value="0"></label><label>y<sub>c</sub> <input type="number" id="yc" value="0"></label>
+    <label>R <input type="number" id="r" value="9" min="0"></label>
+  </span>
+  <label><input type="checkbox" id="ideal" checked> показать идеальную фигуру</label>
+  <label>Масштаб <input type="range" id="scale" min="3" max="60" value="22"></label>
+  <button id="fit">Вписать</button>
+  <p class="muted">Колесо мыши – масштаб, перетаскивание – сдвиг. <span id="hover"></span></p>
+  <canvas id="cv"></canvas>
+</div>
+
+<div class="card">
+  <h2>Пошаговые вычисления</h2>
+  <p id="info"></p>
+  <div id="steps"></div>
+</div>
+
+<div class="card">
+  <h2>Время работы</h2>
+  <p class="muted">Каждый алгоритм многократно запускается на текущих данных ~150 мс (без отрисовки); показано среднее время одного запуска.</p>
+  <button id="bench">Измерить время</button>
+  <div id="benchOut"></div>
+</div>
+
+<div class="card">
+  <h2>Пояснения</h2>
+  <p><b>Привязка целочисленных координат к сетке.</b> Пиксель – это клетка сетки. Пиксель с целыми координатами (x, y)
+    – это клетка, <b>центр</b> которой находится в точке (x, y); её границы – линии x ± 0.5 и y ± 0.5 (тонкие серые линии сетки).
+    Поэтому оси проходят через центры строки 0 и столбца 0, а идеальный отрезок из (x₀, y₀) в (x₁, y₁) проходит точно через центры его концевых пикселей.
+    Алгоритм растеризации на каждом шаге вдоль главной оси решает, какая клетка ближе всего к идеальной линии.</p>
+  <p><b>Пошаговый алгоритм.</b> Использует явное уравнение прямой y = kx + b, k = Δy/Δx, b = y₀ − kx₀. x пробегает все целые значения от x₀ до x₁,
+    y = round(kx + b). Если |Δy| &gt; |Δx|, роли x и y меняются (x = round(k'y + b')), иначе в линии были бы разрывы.
+    На каждом шаге нужно умножение и округление вещественного числа.</p>
+  <p><b>ЦДА (цифровой дифференциальный анализатор).</b> L = max(|Δx|, |Δy|) шагов. Приращения dx = Δx/L, dy = Δy/L (одно из них равно ±1).
+    x, y начинаются в (x₀, y₀), на каждом шаге x += dx, y += dy; рисуется пиксель (round(x), round(y)). Только сложения, но в вещественных числах.</p>
+  <p><b>Алгоритм Брезенхема (отрезок).</b> Только целочисленная арифметика. При dx = |Δx|, dy = |Δy| ошибка e = dx − dy показывает (в удвоенном виде), насколько идеальная прямая отклонилась от текущего пикселя.
+    На каждом шаге: e₂ = 2e; если e₂ &gt; −dy, то e −= dy, x += sₓ; если e₂ &lt; dx, то e += dx, y += s_y. Работает во всех октантах.</p>
+  <p><b>Алгоритм Брезенхема (окружность).</b> Вычисляется только один октант (от (0, R), пока x ≤ y), каждая точка отражается 8 раз: (±x, ±y), (±y, ±x).
+    Управляющая переменная d = 3 − 2R. Если d &lt; 0, следующий пиксель (x+1, y) и d += 4x + 6; иначе следующий пиксель (x+1, y−1) и d += 4(x − y) + 10.</p>
+  <p><b>Сглаженная линия Ву (доп. задание).</b> Для каждого x вдоль главной оси точное значение y лежит между двумя пикселями y и y+1. Рисуются оба пикселя
+    с интенсивностью (1 − f) и f, где f – дробная часть y. Пиксели ближе к идеальной прямой темнее, поэтому «лесенка» сглаживается.</p>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+const ALG = {
+  step: {
+    name: 'Пошаговый (y = kx + b)', type: 'line', cols: ['шаг', 'x точн.', 'y точн.', 'пиксель'],
+    run({ x0, y0, x1, y1 }, plot, log) {
+      const dx = x1 - x0, dy = y1 - y0;
+      if (!dx && !dy) { plot(x0, y0); return 'Одна точка'; }
+      if (Math.abs(dx) >= Math.abs(dy)) {
+        const k = dy / dx, b = y0 - k * x0, s = Math.sign(dx);
+        for (let x = x0, i = 0; x !== x1 + s; x += s, i++) {
+          const y = k * x + b, py = Math.round(y);
+          plot(x, py); if (log) log.push([i, x, y.toFixed(3), `(${x}, ${py})`]);
+        }
+        return `|Δx| ≥ |Δy|, главная ось – x: k = Δy/Δx = ${k.toFixed(4)}, b = y₀ − kx₀ = ${b.toFixed(4)}`;
+      }
+      const k = dx / dy, b = x0 - k * y0, s = Math.sign(dy);
+      for (let y = y0, i = 0; y !== y1 + s; y += s, i++) {
+        const x = k * y + b, px = Math.round(x);
+        plot(px, y); if (log) log.push([i, x.toFixed(3), y, `(${px}, ${y})`]);
+      }
+      return `|Δy| > |Δx|, главная ось – y: x = k'y + b', k' = Δx/Δy = ${k.toFixed(4)}, b' = ${b.toFixed(4)}`;
+    }
+  },
+  dda: {
+    name: 'ЦДА', type: 'line', cols: ['шаг', 'x', 'y', 'пиксель (округл.)'],
+    run({ x0, y0, x1, y1 }, plot, log) {
+      const dx = x1 - x0, dy = y1 - y0, L = Math.max(Math.abs(dx), Math.abs(dy));
+      if (!L) { plot(x0, y0); return 'Одна точка'; }
+      const xi = dx / L, yi = dy / L;
+      let x = x0, y = y0;
+      for (let i = 0; i <= L; i++) {
+        const px = Math.round(x), py = Math.round(y);
+        plot(px, py); if (log) log.push([i, x.toFixed(3), y.toFixed(3), `(${px}, ${py})`]);
+        x += xi; y += yi;
+      }
+      return `L = max(|Δx|, |Δy|) = ${L}, приращения: dx = ${xi.toFixed(4)}, dy = ${yi.toFixed(4)}`;
+    }
+  },
+  bres: {
+    name: 'Брезенхем (отрезок)', type: 'line', cols: ['шаг', 'x', 'y', 'ошибка e'],
+    run({ x0, y0, x1, y1 }, plot, log) {
+      let x = x0, y = y0;
+      const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+      let e = dx - dy;
+      for (let i = 0; ; i++) {
+        plot(x, y); if (log) log.push([i, x, y, e]);
+        if (x === x1 && y === y1) break;
+        const e2 = 2 * e;
+        if (e2 > -dy) { e -= dy; x += sx; }
+        if (e2 < dx) { e += dx; y += sy; }
+      }
+      return `dx = ${dx}, dy = ${dy}, sₓ = ${sx}, s_y = ${sy}, начальная ошибка e = dx − dy = ${dx - dy}`;
+    }
+  },
+  circle: {
+    name: 'Брезенхем (окружность)', type: 'circle', cols: ['шаг', 'x', 'y', 'd', 'пиксели (8 симметричных)'],
+    run({ xc, yc, r }, plot, log) {
+      let x = 0, y = r, d = 3 - 2 * r;
+      for (let i = 0; x <= y; i++) {
+        plot(xc + x, yc + y); plot(xc - x, yc + y); plot(xc + x, yc - y); plot(xc - x, yc - y);
+        plot(xc + y, yc + x); plot(xc - y, yc + x); plot(xc + y, yc - x); plot(xc - y, yc - x);
+        if (log) log.push([i, x, y, d, `(±${x}, ±${y}), (±${y}, ±${x}) + центр`]);
+        if (d < 0) d += 4 * x + 6; else { d += 4 * (x - y) + 10; y--; }
+        x++;
+      }
+      return `Начало: x = 0, y = R = ${r}, d = 3 − 2R = ${3 - 2 * r}. В таблице первый октант (относительно центра)`;
+    }
+  },
+  wu: {
+    name: 'Сглаженная линия Ву (доп.)', type: 'line', cols: ['главная', 'второстеп. точн.', 'пиксель 1 : интенс.', 'пиксель 2 : интенс.'],
+    run({ x0, y0, x1, y1 }, plot, log) {
+      const steep = Math.abs(y1 - y0) > Math.abs(x1 - x0);
+      if (steep) [x0, y0, x1, y1] = [y0, x0, y1, x1];
+      if (x0 > x1) [x0, y0, x1, y1] = [x1, y1, x0, y0];
+      const g = x1 === x0 ? 0 : (y1 - y0) / (x1 - x0);
+      const P = (a, b, c) => steep ? plot(b, a, c) : plot(a, b, c);
+      let y = y0;
+      for (let x = x0; x <= x1; x++) {
+        const fy = Math.floor(y), f = y - fy;
+        P(x, fy, 1 - f); P(x, fy + 1, f);
+        if (log) log.push([x, y.toFixed(3), `${fy} : ${(1 - f).toFixed(2)}`, `${fy + 1} : ${f.toFixed(2)}`]);
+        y += g;
+      }
+      return `Главная ось: ${steep ? 'y' : 'x'}, наклон = ${g.toFixed(4)}. Интенсивность пикселя = 1 − расстояние до идеальной прямой вдоль второстепенной оси`;
+    }
+  },
+};
+for (const k in ALG) $('alg').add(new Option(ALG[k].name, k));
+
+const cv = $('cv'), ctx = cv.getContext('2d');
+let S = 22, ox = 0, oy = 0;
+const sx = x => ox + x * S, sy = y => oy - y * S;
+
+function params() {
+  const n = id => Math.round(+$(id).value || 0);
+  return { x0: n('x0'), y0: n('y0'), x1: n('x1'), y1: n('y1'), xc: n('xc'), yc: n('yc'), r: Math.abs(n('r')) };
+}
+
+function niceStep(minPx) { const raw = minPx / S, p = 10 ** Math.floor(Math.log10(raw)); for (const m of [1, 2, 5, 10]) if (m * p >= raw) return Math.max(1, m * p); }
+
+function draw() {
+  const a = ALG[$('alg').value], p = params();
+  $('gLine').style.display = a.type === 'line' ? '' : 'none';
+  $('gCirc').style.display = a.type === 'circle' ? '' : 'none';
+
+  const pix = new Map(), log = [];
+  const info = a.run(p, (x, y, al = 1) => { if (al > 0) { const k = x + ',' + y; pix.set(k, Math.max(pix.get(k) || 0, al)); } }, log);
+
+  const W = cv.width, H = cv.height;
+  ctx.clearRect(0, 0, W, H);
+  const xa = Math.floor((0 - ox) / S) - 1, xb = Math.ceil((W - ox) / S) + 1, ya = Math.floor((oy - H) / S) - 1, yb = Math.ceil(oy / S) + 1;
+
+  for (const [k, al] of pix) {
+    const [x, y] = k.split(',').map(Number);
+    ctx.fillStyle = `rgba(30,90,220,${al})`;
+    ctx.fillRect(sx(x - 0.5), sy(y + 0.5), S, S);
+  }
+  if (S >= 6) {
+    ctx.strokeStyle = '#ddd'; ctx.lineWidth = 1; ctx.beginPath();
+    for (let x = xa; x <= xb; x++) { ctx.moveTo(sx(x - 0.5), 0); ctx.lineTo(sx(x - 0.5), H); }
+    for (let y = ya; y <= yb; y++) { ctx.moveTo(0, sy(y - 0.5)); ctx.lineTo(W, sy(y - 0.5)); }
+    ctx.stroke();
+  }
+  ctx.strokeStyle = '#000'; ctx.fillStyle = '#000'; ctx.lineWidth = 1.5; ctx.beginPath();
+  ctx.moveTo(0, sy(0)); ctx.lineTo(W, sy(0)); ctx.moveTo(sx(0), 0); ctx.lineTo(sx(0), H); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(W, sy(0)); ctx.lineTo(W - 10, sy(0) - 5); ctx.lineTo(W - 10, sy(0) + 5);
+  ctx.moveTo(sx(0), 0); ctx.lineTo(sx(0) - 5, 10); ctx.lineTo(sx(0) + 5, 10); ctx.fill();
+  ctx.font = '13px sans-serif'; ctx.fillText('X', W - 14, sy(0) - 8); ctx.fillText('Y', sx(0) + 8, 12);
+  const st = niceStep(28);
+  ctx.font = '11px sans-serif'; ctx.lineWidth = 1; ctx.beginPath();
+  for (let x = Math.ceil(xa / st) * st; x <= xb; x += st) if (x) { ctx.moveTo(sx(x), sy(0) - 4); ctx.lineTo(sx(x), sy(0) + 4); ctx.fillText(x, sx(x) - 6, sy(0) + 15); }
+  for (let y = Math.ceil(ya / st) * st; y <= yb; y += st) if (y) { ctx.moveTo(sx(0) - 4, sy(y)); ctx.lineTo(sx(0) + 4, sy(y)); ctx.fillText(y, sx(0) + 6, sy(y) + 4); }
+  ctx.stroke(); ctx.fillText('0', sx(0) + 4, sy(0) + 14);
+
+  if ($('ideal').checked) {
+    ctx.strokeStyle = '#e22'; ctx.lineWidth = 1.5; ctx.beginPath();
+    if (a.type === 'line') { ctx.moveTo(sx(p.x0), sy(p.y0)); ctx.lineTo(sx(p.x1), sy(p.y1)); }
+    else ctx.arc(sx(p.xc), sy(p.yc), p.r * S, 0, 2 * Math.PI);
+    ctx.stroke();
+  }
+
+  $('info').textContent = `${info}. Всего пикселей: ${pix.size}.`;
+  const rows = log.slice(0, 300).map(r => '<tr>' + r.map(c => `<td>${c}</td>`).join('') + '</tr>').join('');
+  $('steps').innerHTML = `<table><tr>${a.cols.map(c => `<th>${c}</th>`).join('')}</tr>${rows}</table>` + (log.length > 300 ? '<p class="muted">показаны первые 300 строк</p>' : '');
+}
+
+function resize() { cv.width = cv.clientWidth; cv.height = cv.clientHeight; if (!ox) { ox = cv.width / 2; oy = cv.height / 2; } draw(); }
+
+function fit() {
+  const a = ALG[$('alg').value], p = params();
+  const [xmin, xmax, ymin, ymax] = a.type === 'line'
+    ? [Math.min(p.x0, p.x1), Math.max(p.x0, p.x1), Math.min(p.y0, p.y1), Math.max(p.y0, p.y1)]
+    : [p.xc - p.r, p.xc + p.r, p.yc - p.r, p.yc + p.r];
+  S = Math.max(3, Math.min(60, Math.min(cv.width / (xmax - xmin + 4), cv.height / (ymax - ymin + 4))));
+  $('scale').value = S;
+  ox = cv.width / 2 - (xmin + xmax) / 2 * S; oy = cv.height / 2 + (ymin + ymax) / 2 * S;
+  draw();
+}
+
+cv.onwheel = e => {
+  e.preventDefault();
+  const ns = Math.max(3, Math.min(60, S * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+  ox = e.offsetX - (e.offsetX - ox) * ns / S; oy = e.offsetY - (e.offsetY - oy) * ns / S;
+  S = ns; $('scale').value = S; draw();
+};
+let drag = null;
+cv.onmousedown = e => drag = [e.offsetX - ox, e.offsetY - oy];
+window.onmouseup = () => drag = null;
+cv.onmousemove = e => {
+  if (drag) { ox = e.offsetX - drag[0]; oy = e.offsetY - drag[1]; draw(); }
+  $('hover').textContent = `Курсор над пикселем (${Math.round((e.offsetX - ox) / S)}, ${Math.round((oy - e.offsetY) / S)})`;
+};
+$('scale').oninput = () => { const ns = +$('scale').value; ox = cv.width / 2 - (cv.width / 2 - ox) * ns / S; oy = cv.height / 2 - (cv.height / 2 - oy) * ns / S; S = ns; draw(); };
+document.querySelectorAll('input:not(#scale), select').forEach(el => el.addEventListener('input', draw));
+$('alg').addEventListener('change', fit);
+$('fit').onclick = fit;
+window.onresize = resize;
+
+$('bench').onclick = () => {
+  const p = params();
+  let sink = 0;
+  const plot = (x, y) => { sink += x ^ y; };
+  const rows = Object.entries(ALG).map(([k, a]) => {
+    let runs = 0, pixels = 0;
+    a.run(p, () => pixels++, null);
+    const t0 = performance.now();
+    let t;
+    do { for (let i = 0; i < 100; i++) a.run(p, plot, null); runs += 100; t = performance.now() - t0; } while (t < 150);
+    const us = t * 1000 / runs;
+    return `<tr><td style="text-align:left">${a.name}</td><td>${pixels}</td><td>${us.toFixed(3)}</td><td>${(us * 1000 / pixels).toFixed(1)}</td></tr>`;
+  }).join('');
+  $('benchOut').innerHTML = `<p>Отрезок (${p.x0}, ${p.y0}) – (${p.x1}, ${p.y1}); окружность с центром (${p.xc}, ${p.yc}), R = ${p.r}.</p>
+    <table><tr><th>Алгоритм</th><th>пикселей</th><th>мкс на запуск</th><th>нс на пиксель</th></tr>${rows}</table>
+    <p class="muted">Ожидается: Брезенхем быстрее всех (только целочисленные сложения), затем ЦДА (вещественные сложения + округление), пошаговый – медленнее всех (умножение + округление на каждом шаге).
+    Абсолютные значения зависят от компьютера и браузера. Для более стабильных результатов возьмите длинный отрезок (например, 0,0 – 1000,300).</p>`;
+  if (sink === 0.5) console.log(sink);
+};
+
+resize(); fit();
+</script>
+</body>
+</html>

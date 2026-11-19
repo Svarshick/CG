@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Лабораторная 1 – Цветовые модели</title>
+<link rel="stylesheet" href="../style.css">
+<style>
+  .swatch { width: 180px; height: 180px; border-radius: 8px; border: 1px solid #999; }
+  .model { flex: 1; min-width: 280px; }
+  .comp { display: grid; grid-template-columns: 22px 1fr 80px 18px; gap: 8px; align-items: center; margin: 8px 0; }
+  .presets { display: grid; grid-template-columns: repeat(8, 24px); gap: 4px; }
+  .presets button { width: 24px; height: 24px; border: 1px solid #888; padding: 0; }
+  input[type=color] { width: 60px; height: 34px; }
+</style>
+</head>
+<body>
+<a href="../index.html">← Все лабораторные</a>
+<h1>Лабораторная 1. Цветовые модели: CMYK – RGB – HLS</h1>
+
+<div class="card row">
+  <div id="swatch" class="swatch"></div>
+  <div>
+    <p><label>Палитра: <input type="color" id="picker"></label> <b id="hex"></b></p>
+    <div class="presets" id="presets"></div>
+    <p class="muted">Задайте цвет в любой модели: введите точные значения, двигайте ползунки или выберите цвет из палитры.<br>
+      Две другие модели пересчитываются автоматически.</p>
+  </div>
+</div>
+
+<div class="row" id="models"></div>
+
+<div class="card">
+  <h2>Используемые формулы</h2>
+  <p><b>RGB</b> – аддитивная модель (экраны). R, G, B ∈ [0, 255] – интенсивность красного, зелёного и синего света. Далее r = R/255, g = G/255, b = B/255.</p>
+  <p><b>CMYK</b> – субтрактивная модель (печать). C, M, Y – количество голубой, пурпурной и жёлтой краски; K – чёрная краска. Все значения в [0, 100] %.<br>
+    RGB → CMYK: K = 1 − max(r, g, b); C = (1 − r − K) / (1 − K); M = (1 − g − K) / (1 − K); Y = (1 − b − K) / (1 − K) (если K = 1, то C = M = Y = 0).<br>
+    CMYK → RGB: R = 255·(1 − C)(1 − K), G = 255·(1 − M)(1 − K), B = 255·(1 − Y)(1 − K).</p>
+  <p><b>HLS</b> – H (тон) – угол на цветовом круге: 0° красный, 120° зелёный, 240° синий; L (светлота) – 0 чёрный, 50% чистый цвет, 100 белый; S (насыщенность) – 0 серый, 100 чистый цвет.<br>
+    RGB → HLS: max, min из (r, g, b), d = max − min; L = (max + min)/2;
+    S = 0, если d = 0, иначе d/(max + min) при L ≤ 0.5, иначе d/(2 − max − min);
+    H = 60·((g − b)/d mod 6), если max = r; 60·((b − r)/d + 2), если max = g; 60·((r − g)/d + 4), если max = b.<br>
+    HLS → RGB: C = (1 − |2L − 1|)·S, X = C·(1 − |(H/60) mod 2 − 1|), m = L − C/2; (r', g', b') зависит от 60-градусного сектора H:
+    (C,X,0), (X,C,0), (0,C,X), (0,X,C), (X,0,C), (C,0,X); затем R = 255(r' + m) и т.д.</p>
+</div>
+
+<script>
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+function rgb2cmyk([r, g, b]) {
+  r /= 255; g /= 255; b /= 255;
+  const k = 1 - Math.max(r, g, b);
+  if (k >= 1) return [0, 0, 0, 100];
+  return [(1 - r - k) / (1 - k) * 100, (1 - g - k) / (1 - k) * 100, (1 - b - k) / (1 - k) * 100, k * 100];
+}
+function cmyk2rgb([c, m, y, k]) {
+  c /= 100; m /= 100; y /= 100; k /= 100;
+  return [255 * (1 - c) * (1 - k), 255 * (1 - m) * (1 - k), 255 * (1 - y) * (1 - k)];
+}
+function rgb2hls([r, g, b]) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min, l = (max + min) / 2;
+  let h = 0, s = 0;
+  if (d > 0) {
+    s = l <= 0.5 ? d / (max + min) : d / (2 - max - min);
+    if (max === r) h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+  return [h, l * 100, s * 100];
+}
+function hls2rgb([h, l, s]) {
+  l /= 100; s /= 100;
+  const c = (1 - Math.abs(2 * l - 1)) * s, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = l - c / 2;
+  const [r, g, b] = [[c, x, 0], [x, c, 0], [0, c, x], [0, x, c], [x, 0, c], [c, 0, x]][Math.floor(h / 60) % 6];
+  return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
+}
+
+const models = [
+  { name: 'CMYK', comps: ['C', 'M', 'Y', 'K'], max: [100, 100, 100, 100], units: ['%', '%', '%', '%'], digits: 1, toRgb: cmyk2rgb, fromRgb: rgb2cmyk },
+  { name: 'RGB', comps: ['R', 'G', 'B'], max: [255, 255, 255], units: ['', '', ''], digits: 0, toRgb: x => x, fromRgb: x => x },
+  { name: 'HLS', comps: ['H', 'L', 'S'], max: [360, 100, 100], units: ['°', '%', '%'], digits: 1, toRgb: hls2rgb, fromRgb: rgb2hls },
+];
+
+const $ = id => document.getElementById(id);
+const round = (v, d) => +v.toFixed(d);
+
+for (const m of models) {
+  const card = document.createElement('div');
+  card.className = 'card model';
+  card.innerHTML = `<h3>${m.name}</h3>`;
+  m.sliders = []; m.inputs = [];
+  m.comps.forEach((n, i) => {
+    const row = document.createElement('div');
+    row.className = 'comp';
+    row.innerHTML = `<b>${n}</b><input type="range" min="0" max="${m.max[i]}" step="0.1">` +
+      `<input type="number" min="0" max="${m.max[i]}" step="any"><span>${m.units[i]}</span>`;
+    const sl = row.children[1], num = row.children[2];
+    sl.oninput = () => { num.value = round(+sl.value, m.digits); edit(m); };
+    num.oninput = () => { if (num.value !== '' && !isNaN(num.value)) { sl.value = num.value; edit(m); } };
+    num.onchange = () => { num.value = round(clamp(+num.value || 0, 0, m.max[i]), m.digits); edit(m); };
+    m.sliders.push(sl); m.inputs.push(num);
+    card.appendChild(row);
+  });
+  $('models').appendChild(card);
+}
+
+function edit(m) {
+  const vals = m.inputs.map((inp, i) => clamp(+inp.value || 0, 0, m.max[i]));
+  show(m.toRgb(vals), m);
+}
+
+function show(rgb, src) {
+  for (const m of models) {
+    if (m === src) continue;
+    m.fromRgb(rgb).forEach((v, i) => {
+      m.inputs[i].value = round(v, m.digits);
+      m.sliders[i].value = v;
+    });
+  }
+  const hex = '#' + rgb.map(v => Math.round(clamp(v, 0, 255)).toString(16).padStart(2, '0')).join('');
+  $('swatch').style.background = hex;
+  $('hex').textContent = hex.toUpperCase();
+  $('picker').value = hex;
+}
+
+const hexToRgb = h => [1, 3, 5].map(i => parseInt(h.substr(i, 2), 16));
+$('picker').oninput = e => show(hexToRgb(e.target.value), null);
+
+['#000000', '#ffffff', '#808080', '#ff0000', '#00ff00', '#0000ff', '#ffff00', '#00ffff',
+ '#ff00ff', '#ff8000', '#8000ff', '#008040', '#804000', '#ffc0cb', '#003366', '#c0c0c0'].forEach(c => {
+  const b = document.createElement('button');
+  b.style.background = c; b.title = c;
+  b.onclick = () => show(hexToRgb(c), null);
+  $('presets').appendChild(b);
+});
+
+show([51, 153, 204], null);
+</script>
+</body>
+</html>
